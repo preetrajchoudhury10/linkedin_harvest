@@ -58,15 +58,15 @@ async def scheduled_hunt(app: Application):
             parse_mode="HTML",
         )
 
-        harvester.start_browser(cookies_data=cookies)
+        await harvester.start_browser(cookies_data=cookies)
 
-        if not harvester.is_session_valid():
+        if not await harvester.is_session_valid():
             await app.bot.send_message(
                 chat_id=chat_id,
                 text="\u274C Session expired. Re-run generate_cookies.py and update LINKEDIN_COOKIES.",
             )
             app.bot_data["is_hunting"] = False
-            harvester.close()
+            await harvester.close()
             return
 
         config = load_config()
@@ -79,7 +79,7 @@ async def scheduled_hunt(app: Application):
                  f"(DB has {db.total_count()} emails already)...",
         )
 
-        ai_posts, backend_posts, total_posts = harvester.harvest(config)
+        ai_posts, backend_posts, total_posts = await harvester.harvest(config)
 
         OUTPUT_DIR.mkdir(exist_ok=True)
         stats = categorize_and_write(ai_posts, backend_posts, OUTPUT_DIR, email_db=db)
@@ -133,7 +133,7 @@ async def scheduled_hunt(app: Application):
             text=f"\u274C Scheduled harvest failed: {e}",
         )
     finally:
-        harvester.close()
+        await harvester.close()
         app.bot_data["is_hunting"] = False
 
 

@@ -115,16 +115,16 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     harvester = LinkedInHarvester()
     try:
         await status_msg.edit_text("\U0001F50D Launching browser & validating session...")
-        harvester.start_browser(cookies_data=cookies)
+        await harvester.start_browser(cookies_data=cookies)
 
-        if not harvester.is_session_valid():
+        if not await harvester.is_session_valid():
             await status_msg.edit_text(
                 "\u274C LinkedIn session expired.\n"
                 "Re-run generate_cookies.py and /setcookies again.",
                 parse_mode="HTML",
             )
             context.bot_data["is_hunting"] = False
-            harvester.close()
+            await harvester.close()
             return
 
         config = load_config()
@@ -136,7 +136,7 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"(DB has {db.total_count()} emails already)..."
         )
 
-        ai_posts, backend_posts, total_posts = harvester.harvest(config)
+        ai_posts, backend_posts, total_posts = await harvester.harvest(config)
 
         await status_msg.edit_text(
             f"\u2705 Scan complete! {total_posts} posts collected.\n"
@@ -191,7 +191,7 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Harvest error: {e}")
         await status_msg.edit_text(f"\u274C Harvest failed: {e}")
     finally:
-        harvester.close()
+        await harvester.close()
         context.bot_data["is_hunting"] = False
 
 

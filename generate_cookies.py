@@ -9,13 +9,14 @@ Steps:
 1. A browser window opens
 2. Log in to LinkedIn manually
 3. Press Enter in the terminal
-4. Copy the base64 output
-5. Set it as LINKEDIN_COOKIES in your Railway dashboard
+4. The base64 string is saved to linkedin_cookies.txt
+5. Open that file, copy contents, set as LINKEDIN_COOKIES in Railway
 """
 
 import json
 import base64
 import logging
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,6 +26,8 @@ try:
 except ImportError:
     logger.error("playwright not installed. Run: pip install playwright && playwright install chromium")
     exit(1)
+
+OUTPUT_FILE = Path(__file__).parent / "linkedin_cookies.txt"
 
 
 def main():
@@ -56,12 +59,11 @@ def main():
         cookies_json = json.dumps(cookies)
         encoded = base64.b64encode(cookies_json.encode()).decode()
 
-        print("\n" + "=" * 60)
-        print("COPY THIS BASE64 STRING (entire block):")
-        print("=" * 60)
-        print(encoded)
-        print("=" * 60)
-        print("\nSet it as LINKEDIN_COOKIES in your Railway environment variables.\n")
+        OUTPUT_FILE.write_text(encoded)
+        print(f"\n✅ Cookies saved to: {OUTPUT_FILE}")
+        print(f"   ({len(cookies)} cookies, {len(encoded)} characters)")
+        print("\nOpen linkedin_cookies.txt, copy the entire contents,")
+        print("and paste it as LINKEDIN_COOKIES in your Railway dashboard.\n")
 
         page.close()
         browser.close()
