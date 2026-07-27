@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+output/
+*.log
+cookies.json
+linkedin_cookies.txt

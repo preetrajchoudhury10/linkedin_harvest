@@ -1,0 +1,39 @@
+{
+  "ai_ml_keywords": [
+    "hiring generative AI engineer",
+    "AI ML engineer email",
+    "NLP engineer opportunity",
+    "LLM engineer hiring",
+    "RAG pipeline developer",
+    "hiring prompt engineer",
+    "AI engineer fresher",
+    "machine learning engineer contact",
+    "hiring deep learning engineer",
+    "AI developer apply email",
+    "gen ai engineer",
+    "artificial intelligence engineer hiring",
+    "data scientist fresher",
+    "MLOps engineer opportunity"
+  ],
+  "java_backend_keywords": [
+    "hiring Java developer",
+    "Spring Boot developer email",
+    "backend engineer opportunity",
+    "Java microservices hiring",
+    "Java fresher hiring email",
+    "Spring Boot apply",
+    "backend developer contact email",
+    "Java full stack hiring",
+    "software engineer spring boot",
+    "hiring rest api developer",
+    "core java developer",
+    "Java spring boot fresher",
+    "backend engineer intern"
+  ],
+  "settings": {
+    "posts_per_keyword": 200,
+    "delay_between_actions_sec": [3, 7],
+    "delay_between_keywords_sec": [10, 20],
+    "daily_schedule": "09:00"
+  }
+}
