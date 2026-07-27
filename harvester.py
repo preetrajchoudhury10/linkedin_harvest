@@ -31,8 +31,10 @@ class LinkedInHarvester:
         self._playwright = None
         self._browser = None
         self._context = None
+        self._cookies_data = None
 
     async def start_browser(self, cookies_data=None):
+        self._cookies_data = cookies_data
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.launch(
             headless=True,
@@ -74,9 +76,48 @@ class LinkedInHarvester:
 
         return self._context
 
+    async def _ensure_browser(self):
+        if self._context is None:
+            logger.info("No browser context exists, creating new one")
+            await self.start_browser(self._cookies_data)
+            return True
+
+        try:
+            p = await self._context.new_page()
+            await p.close()
+            return True
+        except Exception:
+            logger.warning("Browser context dead, recreating...")
+            await self._cleanup()
+            await self.start_browser(self._cookies_data)
+            return True
+
+    async def _cleanup(self):
+        try:
+            if self._context:
+                await self._context.close()
+        except Exception:
+            pass
+        try:
+            if self._browser:
+                await self._browser.close()
+        except Exception:
+            pass
+        try:
+            if self._playwright:
+                await self._playwright.stop()
+        except Exception:
+            pass
+        self._context = None
+        self._browser = None
+        self._playwright = None
+
+    async def _safe_page(self):
+        await self._ensure_browser()
+        return await self._context.new_page()
+
     async def is_session_valid(self):
-        if not self._context:
-            return False
+        await self._ensure_browser()
         page = await self._context.new_page()
         try:
             await page.goto(
@@ -85,10 +126,7 @@ class LinkedInHarvester:
                 timeout=30000,
             )
             result = "feed" in page.url
-            if result:
-                logger.info("LinkedIn session is valid")
-            else:
-                logger.warning(f"LinkedIn session invalid, at: {page.url}")
+            logger.info(f"LinkedIn session valid: {result}")
             await page.close()
             return result
         except Exception as e:
@@ -99,18 +137,20 @@ class LinkedInHarvester:
                 pass
             return False
 
-    async def _search_keyword(self, page, keyword, max_posts=200):
+    async def _search_keyword(self, keyword, max_posts=200):
         encoded = keyword.replace(" ", "%20")
         url = (
             f"https://www.linkedin.com/search/results/content/"
             f"?keywords={encoded}&origin=SWITCH_SEARCH_VERTICAL"
         )
-        logger.info(f"Searching: '{keyword}' (max {max_posts} posts)")
+        logger.info(f"Searching: '{keyword}'")
 
+        page = await self._safe_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
         except Exception as e:
             logger.warning(f"Navigation failed for '{keyword}': {e}")
+            await page.close()
             return []
 
         await asyncio.sleep(random.uniform(3, 5))
@@ -157,6 +197,11 @@ class LinkedInHarvester:
             if no_new_count >= 8:
                 break
 
+        try:
+            await page.close()
+        except Exception:
+            pass
+
         results = list(seen_texts)[:max_posts]
         logger.info(f"  {len(results)} posts for '{keyword}'")
         return results
@@ -164,6 +209,7 @@ class LinkedInHarvester:
     async def harvest(self, config, progress_callback=None):
         settings = config["settings"]
         posts_per_keyword = settings.get("posts_per_keyword", 200)
+        delay_range = settings.get("delay_between_keywords_sec", [5, 10])
 
         ai_ml_posts = []
         backend_posts = []
@@ -175,43 +221,30 @@ class LinkedInHarvester:
         ]:
             kw_count = len(keyword_list)
             for idx, kw in enumerate(keyword_list, 1):
-                page = await self._context.new_page()
                 try:
-                    posts = await self._search_keyword(page, kw, max_posts=posts_per_keyword)
-                    for post in posts:
-                        target_list.append((post, kw))
-                    total_posts += len(posts)
-                except Exception as e:
-                    logger.error(f"Error searching '{kw}': {e}")
-                finally:
+                    posts_found = 0
                     try:
-                        await page.close()
-                    except Exception:
-                        pass
+                        posts = await self._search_keyword(kw, max_posts=posts_per_keyword)
+                        for post in posts:
+                            target_list.append((post, kw))
+                        posts_found = len(posts)
+                        total_posts += posts_found
+                    except Exception as e:
+                        logger.error(f"Error searching '{kw}': {e}")
 
-                if progress_callback:
-                    await progress_callback(
-                        category, idx, kw_count, kw, len(posts), total_posts
-                    )
+                    if progress_callback:
+                        try:
+                            await progress_callback(category, idx, kw_count, kw, posts_found, total_posts)
+                        except Exception:
+                            pass
 
-                delay = random.uniform(*settings.get("delay_between_keywords_sec", [5, 10]))
+                except Exception as e:
+                    logger.error(f"Unhandled error for '{kw}': {e}")
+
+                delay = random.uniform(*delay_range)
                 await asyncio.sleep(delay)
 
         return ai_ml_posts, backend_posts, total_posts
 
     async def close(self):
-        try:
-            if self._context:
-                await self._context.close()
-        except Exception:
-            pass
-        try:
-            if self._browser:
-                await self._browser.close()
-        except Exception:
-            pass
-        try:
-            if self._playwright:
-                await self._playwright.stop()
-        except Exception:
-            pass
+        await self._cleanup()
