@@ -1,5 +1,7 @@
 import logging
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 import json
 
@@ -22,6 +24,24 @@ BASE_DIR = Path(__file__).parent
 CONFIG_FILE = BASE_DIR / "config.json"
 OUTPUT_DIR = BASE_DIR / "output"
 DB_FILE = BASE_DIR / "email_db.json"
+
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"OK")
+
+    def log_message(self, fmt, *args):
+        pass
+
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    logger.info(f"Healthcheck server listening on port {port}")
+    server.serve_forever()
 
 
 def load_config():
@@ -138,6 +158,8 @@ async def scheduled_hunt(app: Application):
 
 
 def main():
+    threading.Thread(target=run_health_server, daemon=True).start()
+
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN not set")
