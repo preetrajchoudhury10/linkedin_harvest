@@ -42,15 +42,24 @@ class LinkedInHarvester:
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
+                "--single-process",
+                "--disable-extensions",
+                "--disable-component-extensions-with-background-pages",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-ipc-flooding-protection",
+                "--mute-audio",
             ],
         )
         self._context = await self._browser.new_context(
-            viewport={"width": 1366, "height": 768},
+            viewport={"width": 1280, "height": 720},
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/126.0.0.0 Safari/537.36"
             ),
+            ignore_https_errors=True,
         )
         await self._context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -58,7 +67,10 @@ class LinkedInHarvester:
         """)
 
         if cookies_data:
-            await self._context.add_cookies(cookies_data)
+            try:
+                await self._context.add_cookies(cookies_data)
+            except Exception as e:
+                logger.warning(f"Error adding cookies: {e}")
 
         return self._context
 
@@ -67,17 +79,24 @@ class LinkedInHarvester:
             return False
         page = await self._context.new_page()
         try:
-            await page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded", timeout=30000)
+            await page.goto(
+                "https://www.linkedin.com/feed/",
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
             result = "feed" in page.url
             if result:
                 logger.info("LinkedIn session is valid")
             else:
-                logger.warning("LinkedIn session expired or blocked")
+                logger.warning(f"LinkedIn session invalid, at: {page.url}")
             await page.close()
             return result
         except Exception as e:
             logger.error(f"Session validation error: {e}")
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
             return False
 
     async def _search_keyword(self, page, keyword, max_posts=200):
@@ -87,12 +106,18 @@ class LinkedInHarvester:
             f"?keywords={encoded}&origin=SWITCH_SEARCH_VERTICAL"
         )
         logger.info(f"Searching: '{keyword}' (max {max_posts} posts)")
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        except Exception as e:
+            logger.warning(f"Navigation failed for '{keyword}': {e}")
+            return []
+
         await asyncio.sleep(random.uniform(3, 5))
 
         seen_texts = set()
         scroll_attempts = 0
-        max_scrolls = 80
+        max_scrolls = 30
         no_new_count = 0
 
         selectors = [
@@ -100,15 +125,16 @@ class LinkedInHarvester:
             "div.update-components-text",
             "div[class*='break-words']",
             "span.break-words",
-            "div[data-view-name='search-result-entity']",
             "div.occludable-update",
-            "span[dir='ltr']",
             "article",
         ]
 
         while len(seen_texts) < max_posts and scroll_attempts < max_scrolls:
             scroll_attempts += 1
-            await page.evaluate("window.scrollBy(0, 900)")
+            try:
+                await page.evaluate("window.scrollBy(0, 900)")
+            except Exception:
+                break
             await asyncio.sleep(random.uniform(1.5, 3))
 
             found_any = False
@@ -132,15 +158,13 @@ class LinkedInHarvester:
                 break
 
         results = list(seen_texts)[:max_posts]
-        logger.info(f"  Collected {len(results)} posts for '{keyword}'")
+        logger.info(f"  {len(results)} posts for '{keyword}'")
         return results
 
-    async def harvest(self, config):
+    async def harvest(self, config, progress_callback=None):
         settings = config["settings"]
         posts_per_keyword = settings.get("posts_per_keyword", 200)
-        delay_between_keywords = settings.get("delay_between_keywords_sec", [10, 20])
 
-        page = await self._context.new_page()
         ai_ml_posts = []
         backend_posts = []
         total_posts = 0
@@ -149,8 +173,9 @@ class LinkedInHarvester:
             ("AI/ML", config["ai_ml_keywords"], ai_ml_posts),
             ("Backend", config["java_backend_keywords"], backend_posts),
         ]:
-            logger.info(f"Searching {len(keyword_list)} {category} keywords")
-            for kw in keyword_list:
+            kw_count = len(keyword_list)
+            for idx, kw in enumerate(keyword_list, 1):
+                page = await self._context.new_page()
                 try:
                     posts = await self._search_keyword(page, kw, max_posts=posts_per_keyword)
                     for post in posts:
@@ -158,20 +183,35 @@ class LinkedInHarvester:
                     total_posts += len(posts)
                 except Exception as e:
                     logger.error(f"Error searching '{kw}': {e}")
+                finally:
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
 
-                delay = random.uniform(*delay_between_keywords)
+                if progress_callback:
+                    await progress_callback(
+                        category, idx, kw_count, kw, len(posts), total_posts
+                    )
+
+                delay = random.uniform(*settings.get("delay_between_keywords_sec", [5, 10]))
                 await asyncio.sleep(delay)
 
-        await page.close()
         return ai_ml_posts, backend_posts, total_posts
 
     async def close(self):
         try:
             if self._context:
                 await self._context.close()
+        except Exception:
+            pass
+        try:
             if self._browser:
                 await self._browser.close()
+        except Exception:
+            pass
+        try:
             if self._playwright:
                 await self._playwright.stop()
-        except Exception as e:
-            logger.error(f"Error closing browser: {e}")
+        except Exception:
+            pass

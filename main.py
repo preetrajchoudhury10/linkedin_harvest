@@ -93,13 +93,23 @@ async def scheduled_hunt(app: Application):
         db = EmailDatabase(DB_FILE)
         total_keywords = len(config["ai_ml_keywords"]) + len(config["java_backend_keywords"])
 
-        await app.bot.send_message(
+        progress_msg = await app.bot.send_message(
             chat_id=chat_id,
             text=f"\U0001F50E Searching {total_keywords} keywords "
                  f"(DB has {db.total_count()} emails already)...",
         )
 
-        ai_posts, backend_posts, total_posts = await harvester.harvest(config)
+        async def progress(category, idx, total, keyword, posts_found, cumulative):
+            try:
+                await progress_msg.edit_text(
+                    f"\U0001F50E <b>{category}</b> \u2014 keyword {idx}/{total}\n"
+                    f"   \u201C{keyword}\u201D \u2192 {posts_found} posts\n"
+                    f"   \U0001F4E6 Cumulative: {cumulative} posts"
+                )
+            except Exception:
+                pass
+
+        ai_posts, backend_posts, total_posts = await harvester.harvest(config, progress_callback=progress)
 
         OUTPUT_DIR.mkdir(exist_ok=True)
         stats = categorize_and_write(ai_posts, backend_posts, OUTPUT_DIR, email_db=db)
