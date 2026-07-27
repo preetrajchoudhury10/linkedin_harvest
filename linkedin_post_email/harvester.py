@@ -126,6 +126,20 @@ class LinkedInHarvester:
             logger.warning(f"  Non-200 response")
             return []
 
+        page_title = ""
+        m = __import__("re").search(r"<title>(.*?)</title>", resp.text, __import__("re").IGNORECASE | __import__("re").DOTALL)
+        if m:
+            page_title = m.group(1).strip()
+        at_count = resp.text.count("@")
+        logger.info(f"  Title: {page_title[:120]}, @ count: {at_count}")
+        if at_count == 0 and len(resp.text) > 200:
+            snippet = resp.text[:400]
+            logger.info(f"  HTML snippet: {snippet}")
+            if "sign-in" in snippet.lower() or "login" in snippet.lower():
+                logger.warning("  -> Looks like a login page!")
+            elif "__NEXT_DATA__" in snippet or "deferred-state" in snippet:
+                logger.info("  -> Client-rendered shell (no server content)")
+
         emails = find_emails_in_text(resp.text)
         result = list(emails)
 
