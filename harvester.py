@@ -15,6 +15,10 @@ def decode_cookies_from_env():
     if not raw:
         return None
     try:
+        raw = raw.strip()
+        padding = 4 - len(raw) % 4
+        if padding != 4:
+            raw += "=" * padding
         decoded = base64.b64decode(raw).decode()
         return json.loads(decoded)
     except Exception as e:

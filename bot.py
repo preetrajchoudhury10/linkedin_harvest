@@ -41,7 +41,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/hunt \u2014 Run harvest now\n"
         "/status \u2014 Last harvest + DB stats\n"
         "/alldb \u2014 Download full email database\n"
-        "/setcookies <base64> \u2014 Set LinkedIn session\n"
+        "/setcookies (base64) \u2014 Set LinkedIn session\n"
         "/help \u2014 All commands",
         parse_mode="HTML",
     )
@@ -55,7 +55,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/hunt \u2014 Run LinkedIn harvest immediately\n"
         "/status \u2014 Last run + master DB stats\n"
         "/alldb \u2014 Download complete email database\n"
-        "/setcookies <base64> \u2014 Upload LinkedIn cookies\n\n"
+        "/setcookies + base64 \u2014 Upload LinkedIn cookies\n\n"
         "<b>How dedup works:</b>\n"
         "Each email is stored in the master DB on first sight.\n"
         "Daily files only contain <b>new</b> (unseen) emails.\n"
@@ -67,7 +67,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_setcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await update.message.reply_text(
-            "Usage: /setcookies <base64_string>\n\n"
+            "Usage: /setcookies (base64_string)\n\n"
             "Run <code>generate_cookies.py</code> locally first.",
             parse_mode="HTML",
         )
