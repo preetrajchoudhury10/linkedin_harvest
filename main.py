@@ -1,16 +1,16 @@
 import logging
 import os
-from datetime import time as dtime
+from pathlib import Path
+import json
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from bot import cmd_start, cmd_help, cmd_hunt, cmd_status, cmd_setcookies
+from bot import cmd_start, cmd_help, cmd_hunt, cmd_status, cmd_setcookies, cmd_alldb
 from harvester import LinkedInHarvester, decode_cookies_from_env
 from extractor import categorize_and_write
-from pathlib import Path
-import json
+from email_db import EmailDatabase
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).parent
 CONFIG_FILE = BASE_DIR / "config.json"
 OUTPUT_DIR = BASE_DIR / "output"
+DB_FILE = BASE_DIR / "email_db.json"
 
 
 def load_config():
@@ -69,38 +70,61 @@ async def scheduled_hunt(app: Application):
             return
 
         config = load_config()
+        db = EmailDatabase(DB_FILE)
+        total_keywords = len(config["ai_ml_keywords"]) + len(config["java_backend_keywords"])
+
+        await app.bot.send_message(
+            chat_id=chat_id,
+            text=f"\U0001F50E Searching {total_keywords} keywords "
+                 f"(DB has {db.total_count()} emails already)...",
+        )
+
         ai_posts, backend_posts, total_posts = harvester.harvest(config)
 
         OUTPUT_DIR.mkdir(exist_ok=True)
-        stats = categorize_and_write(ai_posts, backend_posts, OUTPUT_DIR)
+        stats = categorize_and_write(ai_posts, backend_posts, OUTPUT_DIR, email_db=db)
         stats["total_posts"] = total_posts
 
         app.bot_data["last_hunt"] = {
             "time": __import__("datetime").datetime.now().isoformat(),
-            "ai_count": stats["ai"]["count"],
-            "backend_count": stats["backend"]["count"],
+            "ai_new": stats["ai"]["new"],
+            "ai_total": stats["ai"]["total_found"],
+            "backend_new": stats["backend"]["new"],
+            "backend_total": stats["backend"]["total_found"],
             "total_posts": total_posts,
         }
 
+        total_new = stats["ai"]["new"] + stats["backend"]["new"]
+        db_breakdown = db.breakdown()
+
         summary = (
             f"\u2705 <b>Scheduled Harvest Complete</b>\n\n"
-            f"\U0001F916 AI/ML \u2192 {stats['ai']['count']} emails\n"
-            f"\u2615 Backend \u2192 {stats['backend']['count']} emails\n"
-            f"\U0001F50E Posts scanned: {total_posts}"
+            f"\U0001F4E8 <b>New emails:</b> {total_new}\n"
+            f"  \U0001F916 AI/ML: {stats['ai']['new']} new (found {stats['ai']['total_found']})\n"
+            f"  \u2615 Backend: {stats['backend']['new']} new (found {stats['backend']['total_found']})\n"
+            f"\U0001F50E Posts scanned: {total_posts}\n\n"
+            f"\U0001F4CA <b>Master DB:</b> {db_breakdown['total']} total unique\n"
+            f"  \U0001F916 AI/ML: {db_breakdown['ai']}  |  \u2615 Backend: {db_breakdown['backend']}"
         )
         await app.bot.send_message(chat_id=chat_id, text=summary, parse_mode="HTML")
 
-        for label in ("ai", "backend"):
-            fp = stats[label]["file"]
-            if Path(fp).stat().st_size > 0:
-                with open(fp, "rb") as f:
-                    await app.bot.send_document(
-                        chat_id=chat_id,
-                        document=f,
-                        filename=Path(fp).name,
-                    )
+        if total_new > 0:
+            for label in ("ai", "backend"):
+                fp = stats[label]["file"]
+                if Path(fp).stat().st_size > 0:
+                    with open(fp, "rb") as f:
+                        await app.bot.send_document(
+                            chat_id=chat_id,
+                            document=f,
+                            filename=Path(fp).name,
+                        )
+        else:
+            await app.bot.send_message(
+                chat_id=chat_id,
+                text="\U0001F4AD No new emails this time. All already in DB.",
+            )
 
-        logger.info(f"Scheduled harvest complete: {stats}")
+        logger.info(f"Scheduled harvest complete: {stats['ai']['new'] + stats['backend']['new']} new emails")
 
     except Exception as e:
         logger.error(f"Scheduled harvest failed: {e}")
@@ -126,6 +150,7 @@ def main():
     app.add_handler(CommandHandler("hunt", cmd_hunt))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("setcookies", cmd_setcookies))
+    app.add_handler(CommandHandler("alldb", cmd_alldb))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_help))
 
     async def post_init(application: Application):
@@ -144,13 +169,14 @@ def main():
         scheduler.start()
         logger.info("Scheduler started: daily harvest at 09:00")
 
+        db = EmailDatabase(DB_FILE)
         chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
         if chat_id:
             await application.bot.send_message(
                 chat_id=chat_id,
                 text="\U0001F916 <b>LinkedIn Email Harvester Bot is live!</b>\n\n"
-                     "Daily harvest scheduled at 09:00.\n"
-                     "Use /hunt to run now, /help for commands.",
+                     f"\U0001F4CA Master DB: {db.total_count()} emails collected\n"
+                     "Daily harvest at 09:00. Use /hunt to run now.",
                 parse_mode="HTML",
             )
 

@@ -40,12 +40,12 @@ def extract_emails(posts_with_keyword):
                 if clean not in keyword_map:
                     keyword_map[clean] = keyword
 
-    logger.info(f"Extracted {len(email_set)} unique valid emails")
     return list(email_set), keyword_map
 
 
-def write_email_file(emails, role_label, output_dir):
-    date_str = datetime.now().strftime("%Y%m%d")
+def write_email_file(emails, role_label, output_dir, date_str=None):
+    if date_str is None:
+        date_str = datetime.now().strftime("%Y%m%d")
     filename = f"{role_label}_{date_str}.txt"
     filepath = output_dir / filename
 
@@ -57,14 +57,36 @@ def write_email_file(emails, role_label, output_dir):
     return filepath
 
 
-def categorize_and_write(ai_ml_posts, backend_posts, output_dir):
+def categorize_and_write(ai_ml_posts, backend_posts, output_dir, email_db=None, date_str=None):
     ai_emails, ai_keyword_map = extract_emails(ai_ml_posts)
     backend_emails, backend_keyword_map = extract_emails(backend_posts)
 
-    ai_file = write_email_file(ai_emails, "ai", output_dir)
-    backend_file = write_email_file(backend_emails, "backend", output_dir)
+    if email_db:
+        ai_new = email_db.add_emails([(e, ai_keyword_map.get(e, "")) for e in ai_emails], "ai")
+        backend_new = email_db.add_emails([(e, backend_keyword_map.get(e, "")) for e in backend_emails], "backend")
+        new_ai_emails = [e for e, _ in ai_new]
+        new_backend_emails = [e for e, _ in backend_new]
+    else:
+        new_ai_emails = ai_emails
+        new_backend_emails = backend_emails
+
+    ai_file = write_email_file(new_ai_emails, "ai", output_dir, date_str)
+    backend_file = write_email_file(new_backend_emails, "backend", output_dir, date_str)
+
+    db_stats = email_db.breakdown() if email_db else None
 
     return {
-        "ai": {"count": len(ai_emails), "file": str(ai_file), "emails": ai_emails},
-        "backend": {"count": len(backend_emails), "file": str(backend_file), "emails": backend_emails},
+        "ai": {
+            "new": len(new_ai_emails),
+            "total_found": len(ai_emails),
+            "file": str(ai_file),
+            "emails": new_ai_emails,
+        },
+        "backend": {
+            "new": len(new_backend_emails),
+            "total_found": len(backend_emails),
+            "file": str(backend_file),
+            "emails": new_backend_emails,
+        },
+        "db_stats": db_stats,
     }
