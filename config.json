@@ -31,9 +31,8 @@
     "backend engineer intern"
   ],
   "settings": {
-    "posts_per_keyword": 200,
-    "delay_between_actions_sec": [3, 7],
-    "delay_between_keywords_sec": [10, 20],
+    "pages_per_keyword": 2,
+    "delay_between_keywords_sec": [1, 3],
     "daily_schedule": "09:00"
   }
 }

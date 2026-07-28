@@ -105,54 +105,49 @@ class LinkedInHarvester:
             logger.error(f"Session validation error: {e}")
             return False
 
-    async def _search_keyword(self, keyword):
-        encoded = keyword.replace(" ", "%20")
-        url = (
+    async def _search_keyword(self, keyword, pages=1):
+        base_url = (
             f"https://www.linkedin.com/search/results/content/"
-            f"?keywords={encoded}&origin=SWITCH_SEARCH_VERTICAL"
+            f"?keywords={keyword.replace(' ', '%20')}&origin=SWITCH_SEARCH_VERTICAL"
         )
-        logger.info(f"Searching: '{keyword}'")
+        logger.info(f"Searching: '{keyword}' ({pages} page{'s' if pages>1 else ''})")
 
+        all_emails = set()
         await self._ensure_browser()
-        try:
-            resp = await self._client.get(url)
-        except Exception as e:
-            logger.warning(f"Request failed: {e}")
-            return []
 
-        logger.info(f"  Status: {resp.status_code}, URL: {resp.url}, Size: {len(resp.text)} bytes")
+        for page_num in range(1, pages + 1):
+            url = f"{base_url}&page={page_num}"
+            try:
+                resp = await self._client.get(url)
+            except Exception as e:
+                logger.warning(f"  Page {page_num} failed: {e}")
+                continue
 
-        if resp.status_code != 200:
-            logger.warning(f"  Non-200 response")
-            return []
+            if resp.status_code != 200:
+                logger.warning(f"  Page {page_num} non-200: {resp.status_code}")
+                continue
 
-        page_title = ""
-        m = re.search(r"<title>(.*?)</title>", resp.text, re.I | re.S)
-        if m:
-            page_title = m.group(1).strip()
-        at_count = resp.text.count("@")
-        logger.info(f"  Title: {page_title[:120]}, @ count: {at_count}")
-        if at_count == 0 and len(resp.text) > 200:
-            snippet = resp.text[:400]
-            logger.info(f"  HTML snippet: {snippet}")
-            if "sign-in" in snippet.lower() or "login" in snippet.lower():
-                logger.warning("  -> Looks like a login page!")
-            elif "__NEXT_DATA__" in snippet or "deferred-state" in snippet:
-                logger.info("  -> Client-rendered shell (no server content)")
+            page_emails = find_emails_in_text(resp.text)
+            new_emails = page_emails - all_emails
+            all_emails.update(page_emails)
 
-        emails = find_emails_in_text(resp.text)
-        result = list(emails)
+            at_count = resp.text.count("@")
+            m = re.search(r"<title>(.*?)</title>", resp.text, re.I | re.S)
+            title = m.group(1).strip()[:80] if m else "N/A"
+            logger.info(f"  Page {page_num}: {len(resp.text)}b, title={title}, @={at_count}, new_emails={len(new_emails)}")
 
-        if result:
-            logger.info(f"  {len(result)} emails: {result[:3]}...")
-        else:
-            logger.info(f"  0 emails")
+            if pages > 1 and page_num < pages:
+                await asyncio.sleep(random.uniform(0.5, 1.5))
 
+        result = list(all_emails)
+        logger.info(f"  Total: {len(result)} unique emails for '{keyword}'")
         return result
 
-    async def harvest(self, config, progress_callback=None):
+    async def harvest(self, config, pages=None, progress_callback=None):
         settings = config["settings"]
         delay_range = settings.get("delay_between_keywords_sec", [1, 3])
+        if pages is None:
+            pages = settings.get("pages_per_keyword", 2)
 
         ai_emails = []
         backend_emails = []
@@ -165,7 +160,7 @@ class LinkedInHarvester:
             for idx, kw in enumerate(keyword_list, 1):
                 emails = []
                 try:
-                    emails = await self._search_keyword(kw)
+                    emails = await self._search_keyword(kw, pages=pages)
                     for e in emails:
                         target_list.append((e, kw))
                 except Exception as e:

@@ -38,7 +38,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"\U0001F4CA <b>Master DB:</b> {bd['total']} unique emails collected\n"
         f"  \U0001F916 AI/ML: {bd['ai']}  |  \u2615 Backend: {bd['backend']}\n\n"
         "<b>Commands:</b>\n"
-        "/hunt \u2014 Run harvest now\n"
+        "/hunt \u2014 Run harvest (default 2 pages/keyword)\n"
+        "/hunt 5 \u2014 Custom pages per keyword\n"
         "/status \u2014 Last harvest + DB stats\n"
         "/alldb \u2014 Download full email database\n"
         "/debug \u2014 Diagnose session & search\n"
@@ -53,7 +54,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\U0001F4CB <b>Commands</b>\n\n"
         "/start \u2014 Welcome & DB stats\n"
         "/help \u2014 This message\n"
-        "/hunt \u2014 Run LinkedIn harvest immediately\n"
+        "/hunt \u2014 Run harvest (2 pages/keyword)\n"
+        "/hunt 5 \u2014 Custom pages per keyword\n"
         "/status \u2014 Last run + master DB stats\n"
         "/alldb \u2014 Download complete email database\n"
         "/debug \u2014 Test session & keyword search\n"
@@ -158,6 +160,19 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("\u23F3 Harvest already in progress...")
         return
 
+    pages = None
+    if context.args:
+        try:
+            pages = max(1, int(context.args[0]))
+        except ValueError:
+            await update.message.reply_text(
+                "Usage: /hunt [pages_per_keyword]\n"
+                "Example: <code>/hunt 3</code> \u2014 scan 3 pages per keyword\n"
+                "Default: 2 pages per keyword",
+                parse_mode="HTML",
+            )
+            return
+
     cookies = context.bot_data.get("linkedin_cookies")
     if not cookies:
         env_cookies = decode_cookies_from_env()
@@ -175,7 +190,8 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     context.bot_data["is_hunting"] = True
-    status_msg = await update.message.reply_text("\U0001F50D Starting LinkedIn harvest...")
+    pages_str = f" ({pages} pages/keyword)" if pages else ""
+    status_msg = await update.message.reply_text(f"\U0001F50D Starting LinkedIn harvest{pages_str}...")
 
     harvester = LinkedInHarvester()
     try:
@@ -198,7 +214,8 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await status_msg.edit_text(
             f"\u2705 Session valid! Searching {total_keywords} keywords "
-            f"(DB has {db.total_count()} emails already)..."
+            f"({pages if pages else config['settings'].get('pages_per_keyword', 2)} pages each, "
+            f"DB has {db.total_count()} emails already)..."
         )
 
         async def progress(category, idx, total, keyword, emails_found, cumulative):
@@ -212,7 +229,7 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
-        ai_emails, backend_emails, total_emails = await harvester.harvest(config, progress_callback=progress)
+        ai_emails, backend_emails, total_emails = await harvester.harvest(config, pages=pages, progress_callback=progress)
 
         await status_msg.edit_text(
             f"\u2705 Scan complete! {total_emails} emails found.\n"
