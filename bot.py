@@ -7,7 +7,7 @@ from pathlib import Path
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from harvester import LinkedInHarvester, decode_cookies_from_env
+from harvester import LinkedInHarvester, decode_cookies_from_env, find_emails_in_text
 from extractor import categorize_and_write
 from email_db import EmailDatabase
 
@@ -41,6 +41,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/hunt \u2014 Run harvest now\n"
         "/status \u2014 Last harvest + DB stats\n"
         "/alldb \u2014 Download full email database\n"
+        "/debug \u2014 Diagnose session & search\n"
         "/setcookies (base64) \u2014 Set LinkedIn session\n"
         "/help \u2014 All commands",
         parse_mode="HTML",
@@ -55,6 +56,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/hunt \u2014 Run LinkedIn harvest immediately\n"
         "/status \u2014 Last run + master DB stats\n"
         "/alldb \u2014 Download complete email database\n"
+        "/debug \u2014 Test session & keyword search\n"
         "/setcookies + base64 \u2014 Upload LinkedIn cookies\n\n"
         "<b>How dedup works:</b>\n"
         "Each email is stored in the master DB on first sight.\n"
@@ -88,6 +90,69 @@ async def cmd_setcookies(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"\u274C Invalid cookie data: {e}")
 
 
+async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = await update.message.reply_text("Running diagnostics...")
+    lines = ["<b>Diagnostics</b>\n"]
+
+    raw = os.environ.get("LINKEDIN_COOKIES", "")
+    lines.append(f"<b>Cookies:</b>")
+    lines.append(f"  Env exists: {'yes' if raw else 'no'} ({len(raw)} chars)")
+    cookies = context.bot_data.get("linkedin_cookies") or decode_cookies_from_env()
+    if cookies:
+        lines.append(f"  Decoded: {len(cookies)} cookies")
+        for c in cookies[:3]:
+            lines.append(f"    {c.get('name','?')}: {c.get('value','')[:30]}...")
+    else:
+        lines.append("  \u274C No cookies")
+
+    h = LinkedInHarvester()
+    try:
+        await h.start_browser(cookies_data=cookies)
+        valid = await h.is_session_valid()
+        lines.append(f"\n<b>Session:</b> {'\u2705 Valid' if valid else '\u274C Invalid'}")
+    except Exception as e:
+        lines.append(f"\n<b>Session:</b> \u274C Error: {e}")
+        await h.close()
+        await msg.edit_text("\n".join(lines), parse_mode="HTML")
+        return
+
+    import re as re_mod
+    kw = "hiring generative AI engineer"
+    lines.append(f"\n<b>Test search:</b> \"{kw}\"")
+    try:
+        encoded = kw.replace(" ", "%20")
+        url = f"https://www.linkedin.com/search/results/content/?keywords={encoded}&origin=SWITCH_SEARCH_VERTICAL"
+        await h._ensure_browser()
+        resp = await h._client.get(url)
+        lines.append(f"  Status: {resp.status_code}, URL: {resp.url}")
+        lines.append(f"  Size: {len(resp.text)} bytes")
+
+        m = re_mod.search(r"<title>(.*?)</title>", resp.text, re_mod.I | re_mod.S)
+        title = m.group(1).strip()[:80] if m else "N/A"
+        lines.append(f"  Title: {title}")
+
+        at_count = resp.text.count("@")
+        lines.append(f"  '@' count: {at_count}")
+
+        if "sign-in" in resp.text.lower()[:2000]:
+            lines.append("  \u274C Looks like a LOGIN page")
+        elif "challenge" in resp.text.lower()[:2000]:
+            lines.append("  \u26A0 Might be a CHALLENGE page")
+
+        found = find_emails_in_text(resp.text)
+        if found:
+            for e in list(found)[:10]:
+                lines.append(f"  <code>{e}</code>")
+        else:
+            lines.append("  \u274C No emails found in page")
+    except Exception as e:
+        lines.append(f"  \u274C Error: {e}")
+    finally:
+        await h.close()
+
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
+
+
 async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.bot_data.get("is_hunting"):
         await update.message.reply_text("\u23F3 Harvest already in progress...")
@@ -114,7 +179,7 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     harvester = LinkedInHarvester()
     try:
-        await status_msg.edit_text("\U0001F50D Launching browser & validating session...")
+        await status_msg.edit_text("\U0001F50D Validating session...")
         await harvester.start_browser(cookies_data=cookies)
 
         if not await harvester.is_session_valid():
@@ -136,27 +201,27 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"(DB has {db.total_count()} emails already)..."
         )
 
-        async def progress(category, idx, total, keyword, posts_found, cumulative):
+        async def progress(category, idx, total, keyword, emails_found, cumulative):
             nonlocal status_msg
             try:
                 await status_msg.edit_text(
                     f"\U0001F50E <b>{category}</b> \u2014 keyword {idx}/{total}\n"
-                    f"   \u201C{keyword}\u201D \u2192 {posts_found} posts\n"
-                    f"   \U0001F4E6 Cumulative: {cumulative} posts"
+                    f"   \u201C{keyword}\u201D \u2192 {emails_found} emails\n"
+                    f"   \U0001F4E6 Cumulative: {cumulative} emails"
                 )
             except Exception:
                 pass
 
-        ai_posts, backend_posts, total_posts = await harvester.harvest(config, progress_callback=progress)
+        ai_emails, backend_emails, total_emails = await harvester.harvest(config, progress_callback=progress)
 
         await status_msg.edit_text(
-            f"\u2705 Scan complete! {total_posts} posts collected.\n"
-            "\U0001F4E8 Filtering new emails..."
+            f"\u2705 Scan complete! {total_emails} emails found.\n"
+            "\U0001F4E8 Filtering new..."
         )
 
         OUTPUT_DIR.mkdir(exist_ok=True)
-        stats = categorize_and_write(ai_posts, backend_posts, OUTPUT_DIR, email_db=db)
-        stats["total_posts"] = total_posts
+        stats = categorize_and_write(ai_emails, backend_emails, OUTPUT_DIR, email_db=db)
+        stats["total_emails"] = total_emails
 
         context.bot_data["last_hunt"] = {
             "time": datetime.now().isoformat(),
@@ -164,7 +229,7 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "ai_total": stats["ai"]["total_found"],
             "backend_new": stats["backend"]["new"],
             "backend_total": stats["backend"]["total_found"],
-            "total_posts": total_posts,
+            "total_emails": total_emails,
         }
 
         total_new = stats["ai"]["new"] + stats["backend"]["new"]
@@ -175,7 +240,7 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"\U0001F4E8 <b>New emails today:</b> {total_new}\n"
             f"  \U0001F916 AI/ML: {stats['ai']['new']} new (found {stats['ai']['total_found']})\n"
             f"  \u2615 Backend: {stats['backend']['new']} new (found {stats['backend']['total_found']})\n"
-            f"\U0001F50E Posts scanned: {total_posts}\n\n"
+            f"\U0001F50E Emails found: {total_emails}\n\n"
             f"\U0001F4CA <b>Master DB:</b> {db_breakdown['total']} total unique\n"
             f"  \U0001F916 AI/ML: {db_breakdown['ai']}  |  \u2615 Backend: {db_breakdown['backend']}"
         )
@@ -225,7 +290,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"  Time: {last['time']}",
             f"  New AI: {last['ai_new']} (found {last['ai_total']})",
             f"  New Backend: {last['backend_new']} (found {last['backend_total']})",
-            f"  Posts scanned: {last['total_posts']}",
+            f"  Emails found: {last['total_emails']}",
         ]
 
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")

@@ -9,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from bot import cmd_start, cmd_help, cmd_hunt, cmd_status, cmd_setcookies, cmd_alldb
+from bot import cmd_start, cmd_help, cmd_hunt, cmd_status, cmd_setcookies, cmd_alldb, cmd_debug
 from harvester import LinkedInHarvester, decode_cookies_from_env
 from extractor import categorize_and_write
 from email_db import EmailDatabase
@@ -99,21 +99,21 @@ async def scheduled_hunt(app: Application):
                  f"(DB has {db.total_count()} emails already)...",
         )
 
-        async def progress(category, idx, total, keyword, posts_found, cumulative):
+        async def progress(category, idx, total, keyword, emails_found, cumulative):
             try:
                 await progress_msg.edit_text(
                     f"\U0001F50E <b>{category}</b> \u2014 keyword {idx}/{total}\n"
-                    f"   \u201C{keyword}\u201D \u2192 {posts_found} posts\n"
-                    f"   \U0001F4E6 Cumulative: {cumulative} posts"
+                    f"   \u201C{keyword}\u201D \u2192 {emails_found} emails\n"
+                    f"   \U0001F4E6 Cumulative: {cumulative} emails"
                 )
             except Exception:
                 pass
 
-        ai_posts, backend_posts, total_posts = await harvester.harvest(config, progress_callback=progress)
+        ai_emails, backend_emails, total_emails = await harvester.harvest(config, progress_callback=progress)
 
         OUTPUT_DIR.mkdir(exist_ok=True)
-        stats = categorize_and_write(ai_posts, backend_posts, OUTPUT_DIR, email_db=db)
-        stats["total_posts"] = total_posts
+        stats = categorize_and_write(ai_emails, backend_emails, OUTPUT_DIR, email_db=db)
+        stats["total_emails"] = total_emails
 
         app.bot_data["last_hunt"] = {
             "time": __import__("datetime").datetime.now().isoformat(),
@@ -121,7 +121,7 @@ async def scheduled_hunt(app: Application):
             "ai_total": stats["ai"]["total_found"],
             "backend_new": stats["backend"]["new"],
             "backend_total": stats["backend"]["total_found"],
-            "total_posts": total_posts,
+            "total_emails": total_emails,
         }
 
         total_new = stats["ai"]["new"] + stats["backend"]["new"]
@@ -132,7 +132,7 @@ async def scheduled_hunt(app: Application):
             f"\U0001F4E8 <b>New emails:</b> {total_new}\n"
             f"  \U0001F916 AI/ML: {stats['ai']['new']} new (found {stats['ai']['total_found']})\n"
             f"  \u2615 Backend: {stats['backend']['new']} new (found {stats['backend']['total_found']})\n"
-            f"\U0001F50E Posts scanned: {total_posts}\n\n"
+            f"\U0001F50E Total emails: {total_emails}\n\n"
             f"\U0001F4CA <b>Master DB:</b> {db_breakdown['total']} total unique\n"
             f"  \U0001F916 AI/ML: {db_breakdown['ai']}  |  \u2615 Backend: {db_breakdown['backend']}"
         )
@@ -183,6 +183,7 @@ def main():
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("setcookies", cmd_setcookies))
     app.add_handler(CommandHandler("alldb", cmd_alldb))
+    app.add_handler(CommandHandler("debug", cmd_debug))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_help))
 
     async def post_init(application: Application):
