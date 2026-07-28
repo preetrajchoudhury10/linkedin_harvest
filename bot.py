@@ -40,6 +40,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Commands:</b>\n"
         "/hunt \u2014 Run harvest (default 2 pages/keyword)\n"
         "/hunt 5 \u2014 Custom pages per keyword\n"
+        "/hunt ai \u2014 AI/ML keywords only\n"
+        "/hunt 3 backend \u2014 Backend, 3 pages each\n"
         "/status \u2014 Last harvest + DB stats\n"
         "/alldb \u2014 Download full email database\n"
         "/debug \u2014 Diagnose session & search\n"
@@ -56,6 +58,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/help \u2014 This message\n"
         "/hunt \u2014 Run harvest (2 pages/keyword)\n"
         "/hunt 5 \u2014 Custom pages per keyword\n"
+        "/hunt ai \u2014 AI/ML keywords only\n"
+        "/hunt 3 backend \u2014 Backend, 3 pages each\n"
         "/status \u2014 Last run + master DB stats\n"
         "/alldb \u2014 Download complete email database\n"
         "/debug \u2014 Test session & keyword search\n"
@@ -161,17 +165,28 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     pages = None
+    category = None
     if context.args:
-        try:
-            pages = max(1, int(context.args[0]))
-        except ValueError:
-            await update.message.reply_text(
-                "Usage: /hunt [pages_per_keyword]\n"
-                "Example: <code>/hunt 3</code> \u2014 scan 3 pages per keyword\n"
-                "Default: 2 pages per keyword",
-                parse_mode="HTML",
-            )
-            return
+        for arg in context.args:
+            low = arg.lower()
+            if low.isdigit():
+                pages = max(1, int(low))
+            elif low in ("ai", "ml", "aiml"):
+                category = "ai"
+            elif low in ("backend", "java", "spring"):
+                category = "backend"
+            else:
+                await update.message.reply_text(
+                    "Usage: <code>/hunt [pages] [category]</code>\n\n"
+                    "Examples:\n"
+                    "  <code>/hunt</code> \u2014 all keywords, 2 pages each\n"
+                    "  <code>/hunt 5</code> \u2014 all, 5 pages each\n"
+                    "  <code>/hunt ai</code> \u2014 AI/ML only\n"
+                    "  <code>/hunt 3 backend</code> \u2014 Backend only, 3 pages\n"
+                    "  <code>/hunt 5 ai</code> \u2014 AI/ML only, 5 pages",
+                    parse_mode="HTML",
+                )
+                return
 
     cookies = context.bot_data.get("linkedin_cookies")
     if not cookies:
@@ -190,8 +205,13 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     context.bot_data["is_hunting"] = True
-    pages_str = f" ({pages} pages/keyword)" if pages else ""
-    status_msg = await update.message.reply_text(f"\U0001F50D Starting LinkedIn harvest{pages_str}...")
+    parts = []
+    if category:
+        parts.append(category.upper())
+    if pages:
+        parts.append(f"{pages} pages/keyword")
+    tag = f" ({', '.join(parts)})" if parts else ""
+    status_msg = await update.message.reply_text(f"\U0001F50D Starting LinkedIn harvest{tag}...")
 
     harvester = LinkedInHarvester()
     try:
@@ -209,12 +229,18 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         config = load_config()
+        if category == "ai":
+            config["java_backend_keywords"] = []
+        elif category == "backend":
+            config["ai_ml_keywords"] = []
         total_keywords = len(config["ai_ml_keywords"]) + len(config["java_backend_keywords"])
         db = get_db()
 
+        effective_pages = pages if pages else config['settings'].get('pages_per_keyword', 2)
+        cat_tag = f" [{category.upper()}]" if category else ""
         await status_msg.edit_text(
-            f"\u2705 Session valid! Searching {total_keywords} keywords "
-            f"({pages if pages else config['settings'].get('pages_per_keyword', 2)} pages each, "
+            f"\u2705 Session valid! Searching {total_keywords} keywords{cat_tag} "
+            f"({effective_pages} pages each, "
             f"DB has {db.total_count()} emails already)..."
         )
 
