@@ -9,7 +9,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from bot import cmd_start, cmd_help, cmd_hunt, cmd_status, cmd_setcookies, cmd_alldb
+from bot import cmd_start, cmd_help, cmd_hunt, cmd_status, cmd_setcookies, cmd_alldb, cmd_debug
 from harvester import LinkedInHarvester, decode_cookies_from_env
 from extractor import categorize_and_write
 from email_db import EmailDatabase
@@ -183,6 +183,7 @@ def main():
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("setcookies", cmd_setcookies))
     app.add_handler(CommandHandler("alldb", cmd_alldb))
+    app.add_handler(CommandHandler("debug", cmd_debug))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, cmd_help))
 
     async def post_init(application: Application):

@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "ai_ml": {
+    "anurag.1.b@coforge.com": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "hiring generative AI engineer",
+      "role": "ai"
+    },
+    "vani.sam560@gmail.com": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "AI ML engineer email",
+      "role": "ai"
+    },
+    "jobs@zentis.ai": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "AI ML engineer email",
+      "role": "ai"
+    },
+    "nagesh@global-tech.co.in": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "NLP engineer opportunity",
+      "role": "ai"
+    },
+    "kaushik@trilyonservices.com": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "NLP engineer opportunity",
+      "role": "ai"
+    },
+    "mageshwari@krishpar.com": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "NLP engineer opportunity",
+      "role": "ai"
+    }
+  },
+  "backend": {
+    "devayani.r@kamlaxglobal.com": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "hiring Java developer",
+      "role": "backend"
+    },
+    "rajeev@javentechnologies.com": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "Spring Boot developer email",
+      "role": "backend"
+    },
+    "miraj.kapadia@softwaresyncsmart.com": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "Spring Boot developer email",
+      "role": "backend"
+    },
+    "vasant@javentechnologies.com": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "Spring Boot developer email",
+      "role": "backend"
+    },
+    "pooja.reddy@nexusnow.ai": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "backend engineer opportunity",
+      "role": "backend"
+    },
+    "careers@nexusnow.ai": {
+      "first_seen": "2026-07-28 10:33:57",
+      "keyword": "backend engineer opportunity",
+      "role": "backend"
+    }
+  }
+}

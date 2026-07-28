@@ -25,14 +25,14 @@ def decode_cookies_from_env():
     if not raw:
         return None
     try:
-        raw = raw.strip()
+        raw = raw.strip().strip("\"'")
         padding = 4 - len(raw) % 4
         if padding != 4:
             raw += "=" * padding
         decoded = base64.b64decode(raw).decode()
         return json.loads(decoded)
     except Exception as e:
-        logger.error(f"Failed to decode LINKEDIN_COOKIES: {e}")
+        logger.error(f"Failed to decode LINKEDIN_COOKIES (len={len(raw)}): {e}")
         return None
 
 

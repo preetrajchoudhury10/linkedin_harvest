@@ -7,7 +7,7 @@ from pathlib import Path
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from harvester import LinkedInHarvester, decode_cookies_from_env
+from harvester import LinkedInHarvester, decode_cookies_from_env, find_emails_in_text
 from extractor import categorize_and_write
 from email_db import EmailDatabase
 
@@ -229,6 +229,75 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = await update.message.reply_text("Running diagnostics...")
+    lines = ["<b>Diagnostics</b>\n"]
+
+    # 1. Cookies
+    raw = os.environ.get("LINKEDIN_COOKIES", "")
+    lines.append(f"<b>Cookies:</b>")
+    lines.append(f"  Env exists: {'yes' if raw else 'no'} ({len(raw)} chars)")
+    cookies = context.bot_data.get("linkedin_cookies") or decode_cookies_from_env()
+    if cookies:
+        lines.append(f"  Decoded: {len(cookies)} cookies")
+        for c in cookies[:3]:
+            lines.append(f"    {c.get('name','?')}: {c.get('value','')[:30]}...")
+    else:
+        lines.append("  \u274C No cookies")
+
+    # 2. Test session
+    h = LinkedInHarvester()
+    try:
+        await h.start_browser(cookies_data=cookies if "cookies" in dir() else None)
+        valid = await h.is_session_valid()
+        lines.append(f"\n<b>Session:</b> {'\u2705 Valid' if valid else '\u274C Invalid'}")
+    except Exception as e:
+        lines.append(f"\n<b>Session:</b> \u274C Error: {e}")
+        await h.close()
+        await msg.edit_text("\n".join(lines), parse_mode="HTML")
+        return
+
+    # 3. Test one keyword
+    kw = "hiring generative AI engineer"
+    lines.append(f"\n<b>Test search:</b> \"{kw}\"")
+
+    import re as re_mod
+    try:
+        encoded = kw.replace(" ", "%20")
+        url = f"https://www.linkedin.com/search/results/content/?keywords={encoded}&origin=SWITCH_SEARCH_VERTICAL"
+        await h._ensure_browser()
+        resp = await h._client.get(url)
+        lines.append(f"  Status: {resp.status_code}, URL: {resp.url}")
+        lines.append(f"  Size: {len(resp.text)} bytes")
+
+        m = re_mod.search(r"<title>(.*?)</title>", resp.text, re_mod.I | re_mod.S)
+        title = m.group(1).strip()[:80] if m else "N/A"
+        lines.append(f"  Title: {title}")
+
+        at_count = resp.text.count("@")
+        lines.append(f"  '@' count: {at_count}")
+
+        if "sign-in" in resp.text.lower()[:2000]:
+            lines.append("  \u274C Looks like a LOGIN page")
+        elif "challenge" in resp.text.lower()[:2000]:
+            lines.append("  \u26A0 Might be a CHALLENGE page")
+
+        # Find and show first few emails
+        found = find_emails_in_text(resp.text)
+        if found:
+            for e in list(found)[:10]:
+                lines.append(f"  <code>{e}</code>")
+        else:
+            lines.append("  \u274C No emails found in page")
+
+    except Exception as e:
+        lines.append(f"  \u274C Error: {e}")
+    finally:
+        await h.close()
+
+    await msg.edit_text("\n".join(lines), parse_mode="HTML")
 
 
 async def cmd_alldb(update: Update, context: ContextTypes.DEFAULT_TYPE):
