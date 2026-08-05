@@ -105,12 +105,17 @@ class LinkedInHarvester:
             logger.error(f"Session validation error: {e}")
             return False
 
-    async def _search_keyword(self, keyword, pages=1):
+    async def _search_keyword(self, keyword, pages=1, results_per_page=None):
         base_url = (
             f"https://www.linkedin.com/search/results/content/"
             f"?keywords={keyword.replace(' ', '%20')}&origin=SWITCH_SEARCH_VERTICAL"
         )
-        logger.info(f"Searching: '{keyword}' ({pages} page{'s' if pages>1 else ''})")
+        if results_per_page:
+            base_url += f"&count={results_per_page}"
+        logger.info(
+            f"Searching: '{keyword}' "
+            f"({pages} page{'s' if pages>1 else ''}, {results_per_page or 10} results/page)"
+        )
 
         all_emails = set()
         await self._ensure_browser()
@@ -179,7 +184,7 @@ class LinkedInHarvester:
 
         return ai_emails, backend_emails, len(ai_emails) + len(backend_emails)
 
-    async def harvest_custom(self, keywords, pages=None, delay_range=(1, 3), progress_callback=None):
+    async def harvest_custom(self, keywords, pages=None, results_per_page=None, delay_range=(1, 3), progress_callback=None):
         if pages is None:
             pages = 2
 
@@ -188,7 +193,7 @@ class LinkedInHarvester:
         for idx, kw in enumerate(keywords, 1):
             emails = []
             try:
-                emails = await self._search_keyword(kw, pages=pages)
+                emails = await self._search_keyword(kw, pages=pages, results_per_page=results_per_page)
                 for e in emails:
                     results.append((e, kw))
             except Exception as e:

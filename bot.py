@@ -42,7 +42,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/hunt 5 \u2014 Custom pages per keyword\n"
         "/hunt ai \u2014 AI/ML keywords only\n"
         "/hunt 3 backend \u2014 Backend, 3 pages each\n"
-        "/search &lt;keywords&gt; \u2014 Search your own keywords\n"
+        "/search &lt;pages&gt; &lt;results&gt; &lt;keywords&gt; \u2014 Custom keyword search\n"
         "/status \u2014 Last harvest + DB stats\n"
         "/alldb \u2014 Download full email database\n"
         "/debug \u2014 Diagnose session & search\n"
@@ -61,7 +61,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/hunt 5 \u2014 Custom pages per keyword\n"
         "/hunt ai \u2014 AI/ML keywords only\n"
         "/hunt 3 backend \u2014 Backend, 3 pages each\n"
-        "/search &lt;keywords&gt; \u2014 Search your own keywords\n"
+        "/search &lt;pages&gt; &lt;results&gt; &lt;keywords&gt; \u2014 Custom keyword search\n"
         "/status \u2014 Last run + master DB stats\n"
         "/alldb \u2014 Download complete email database\n"
         "/debug \u2014 Test session & keyword search\n"
@@ -323,14 +323,15 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "Usage: <code>/search &lt;keywords&gt;</code>\n\n"
+            "Usage: <code>/search [pages] [results] &lt;keywords&gt;</code>\n\n"
             "Search LinkedIn with your own keywords and get fresh emails.\n\n"
             "Examples:\n"
             "  <code>/search We're Hiring For AI / ML</code>\n"
-            "  <code>/search Java developer|Spring Boot hiring</code>\n"
-            "  <code>/search 3 AI engineer|ML engineer</code>\n\n"
-            "Separate multiple keywords with <code>|</code> (pipe).\n"
-            "A leading number sets pages per keyword.",
+            "  <code>/search 3 Java developer|Spring Boot hiring</code>\n"
+            "  <code>/search 3 10 Java developer|AI engineer</code>\n\n"
+            "<code>[pages]</code> = pages per keyword (default 2)\n"
+            "<code>[results]</code> = results per page (default 10)\n"
+            "Separate multiple keywords with <code>|</code> (pipe).",
             parse_mode="HTML",
         )
         return
@@ -338,9 +339,14 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw = " ".join(context.args).strip()
     tokens = raw.split()
     pages = None
+    results_per_page = None
     if tokens and tokens[0].isdigit():
-        pages = max(1, int(tokens[0]))
+        pages = max(1, min(30, int(tokens[0])))
         raw = " ".join(tokens[1:])
+        tokens = raw.split()
+        if tokens and tokens[0].isdigit():
+            results_per_page = max(1, min(50, int(tokens[0])))
+            raw = " ".join(tokens[1:])
 
     keywords = [k.strip() for k in raw.split("|") if k.strip()]
     if not keywords:
@@ -368,9 +374,10 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.bot_data["is_hunting"] = True
     effective_pages = pages or 2
+    effective_results = results_per_page or 10
     status_msg = await update.message.reply_text(
         f"\U0001F50D Custom search: {len(keywords)} keyword(s), "
-        f"{effective_pages} pages each..."
+        f"{effective_pages} pages x {effective_results} results/page..."
     )
 
     harvester = LinkedInHarvester()
@@ -409,6 +416,7 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pairs = await harvester.harvest_custom(
             keywords,
             pages=effective_pages,
+            results_per_page=effective_results,
             delay_range=delay_range,
             progress_callback=progress,
         )
