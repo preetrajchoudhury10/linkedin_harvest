@@ -179,5 +179,34 @@ class LinkedInHarvester:
 
         return ai_emails, backend_emails, len(ai_emails) + len(backend_emails)
 
+    async def harvest_custom(self, keywords, pages=None, delay_range=(1, 3), progress_callback=None):
+        if pages is None:
+            pages = 2
+
+        results = []
+        kw_count = len(keywords)
+        for idx, kw in enumerate(keywords, 1):
+            emails = []
+            try:
+                emails = await self._search_keyword(kw, pages=pages)
+                for e in emails:
+                    results.append((e, kw))
+            except Exception as e:
+                logger.error(f"Error searching '{kw}': {e}")
+
+            if progress_callback:
+                try:
+                    await progress_callback(
+                        "Custom", idx, kw_count, kw,
+                        len(emails), len(results),
+                    )
+                except Exception:
+                    pass
+
+            await asyncio.sleep(random.uniform(*delay_range))
+
+        logger.info(f"Custom harvest complete: {len(results)} total emails")
+        return results
+
     async def close(self):
         await self._cleanup()

@@ -42,6 +42,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/hunt 5 \u2014 Custom pages per keyword\n"
         "/hunt ai \u2014 AI/ML keywords only\n"
         "/hunt 3 backend \u2014 Backend, 3 pages each\n"
+        "/search <keywords> \u2014 Search your own keywords\n"
         "/status \u2014 Last harvest + DB stats\n"
         "/alldb \u2014 Download full email database\n"
         "/debug \u2014 Diagnose session & search\n"
@@ -60,6 +61,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/hunt 5 \u2014 Custom pages per keyword\n"
         "/hunt ai \u2014 AI/ML keywords only\n"
         "/hunt 3 backend \u2014 Backend, 3 pages each\n"
+        "/search <keywords> \u2014 Search your own keywords\n"
         "/status \u2014 Last run + master DB stats\n"
         "/alldb \u2014 Download complete email database\n"
         "/debug \u2014 Test session & keyword search\n"
@@ -309,6 +311,151 @@ async def cmd_hunt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Harvest error: {e}")
         await status_msg.edit_text(f"\u274C Harvest failed: {e}")
+    finally:
+        await harvester.close()
+        context.bot_data["is_hunting"] = False
+
+
+async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.bot_data.get("is_hunting"):
+        await update.message.reply_text("\u23F3 A harvest is already in progress...")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: <code>/search &lt;keywords&gt;</code>\n\n"
+            "Search LinkedIn with your own keywords and get fresh emails.\n\n"
+            "Examples:\n"
+            "  <code>/search We're Hiring For AI / ML</code>\n"
+            "  <code>/search Java developer|Spring Boot hiring</code>\n"
+            "  <code>/search 3 AI engineer|ML engineer</code>\n\n"
+            "Separate multiple keywords with <code>|</code> (pipe).\n"
+            "A leading number sets pages per keyword.",
+            parse_mode="HTML",
+        )
+        return
+
+    raw = " ".join(context.args).strip()
+    tokens = raw.split()
+    pages = None
+    if tokens and tokens[0].isdigit():
+        pages = max(1, int(tokens[0]))
+        raw = " ".join(tokens[1:])
+
+    keywords = [k.strip() for k in raw.split("|") if k.strip()]
+    if not keywords:
+        await update.message.reply_text("\u274C No valid keywords found.", parse_mode="HTML")
+        return
+    if len(keywords) > 20:
+        await update.message.reply_text("\u26A0 Maximum 20 keywords per search.", parse_mode="HTML")
+        return
+
+    cookies = context.bot_data.get("linkedin_cookies")
+    if not cookies:
+        env_cookies = decode_cookies_from_env()
+        if env_cookies:
+            cookies = env_cookies
+            context.bot_data["linkedin_cookies"] = cookies
+            context.bot_data["has_cookies"] = True
+        else:
+            await update.message.reply_text(
+                "\u274C No LinkedIn cookies found.\n\n"
+                "Run <code>generate_cookies.py</code> locally, "
+                "then use /setcookies to upload.",
+                parse_mode="HTML",
+            )
+            return
+
+    context.bot_data["is_hunting"] = True
+    effective_pages = pages or 2
+    status_msg = await update.message.reply_text(
+        f"\U0001F50D Custom search: {len(keywords)} keyword(s), "
+        f"{effective_pages} pages each..."
+    )
+
+    harvester = LinkedInHarvester()
+    try:
+        await status_msg.edit_text("\U0001F50D Validating session...")
+        await harvester.start_browser(cookies_data=cookies)
+
+        if not await harvester.is_session_valid():
+            await status_msg.edit_text(
+                "\u274C LinkedIn session expired.\n"
+                "Re-run generate_cookies.py and /setcookies again.",
+                parse_mode="HTML",
+            )
+            return
+
+        db = get_db()
+        await status_msg.edit_text(
+            f"\u2705 Session valid! Searching {len(keywords)} custom keyword(s) "
+            f"(DB has {db.total_count()} emails already)..."
+        )
+
+        config = load_config()
+        delay_range = config["settings"].get("delay_between_keywords_sec", [1, 3])
+
+        async def progress(category, idx, total, keyword, emails_found, cumulative):
+            nonlocal status_msg
+            try:
+                await status_msg.edit_text(
+                    f"\U0001F50E <b>{category}</b> \u2014 keyword {idx}/{total}\n"
+                    f"   \u201C{keyword}\u201D \u2192 {emails_found} emails\n"
+                    f"   \U0001F4E6 Cumulative: {cumulative} emails"
+                )
+            except Exception:
+                pass
+
+        pairs = await harvester.harvest_custom(
+            keywords,
+            pages=effective_pages,
+            delay_range=delay_range,
+            progress_callback=progress,
+        )
+
+        total_emails = len(pairs)
+        await status_msg.edit_text(
+            f"\u2705 Scan complete! {total_emails} emails found.\n"
+            "\U0001F4E8 Filtering new..."
+        )
+
+        OUTPUT_DIR.mkdir(exist_ok=True)
+        new_pairs = db.add_emails(pairs, "custom")
+        new_emails = [e for e, _ in new_pairs]
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = OUTPUT_DIR / f"custom_{ts}.txt"
+        with open(filepath, "w", encoding="utf-8") as f:
+            for email in sorted(new_emails):
+                f.write(f"{email}\n")
+
+        db_breakdown = db.breakdown()
+        summary = (
+            f"\u2705 <b>Custom Search Complete</b>\n\n"
+            f"\U0001F4E8 <b>New emails:</b> {len(new_emails)}\n"
+            f"\U0001F50E Emails found: {total_emails}\n\n"
+            f"\U0001F4CA <b>Master DB:</b> {db_breakdown['total']} total unique\n"
+            f"  \U0001F916 AI/ML: {db_breakdown['ai']}  |  \u2615 Backend: {db_breakdown['backend']}"
+            f"  |  \U0001F4C0 Custom: {db_breakdown['custom']}"
+        )
+        await status_msg.edit_text(summary, parse_mode="HTML")
+
+        if new_emails:
+            with open(filepath, "rb") as f:
+                await context.bot.send_document(
+                    chat_id=update.effective_chat.id,
+                    document=f,
+                    filename=filepath.name,
+                )
+        else:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="\U0001F4AD No new emails this time. All already in DB.",
+            )
+
+    except Exception as e:
+        logger.error(f"Custom search error: {e}")
+        await status_msg.edit_text(f"\u274C Custom search failed: {e}")
     finally:
         await harvester.close()
         context.bot_data["is_hunting"] = False

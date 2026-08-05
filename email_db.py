@@ -14,13 +14,24 @@ class EmailDatabase:
     def _load(self):
         if self.db_path.exists():
             try:
-                return json.loads(self.db_path.read_text())
+                data = json.loads(self.db_path.read_text())
             except (json.JSONDecodeError, Exception) as e:
                 logger.warning(f"Corrupted DB, starting fresh: {e}")
+                return {
+                    "version": 1,
+                    "ai_ml": {},
+                    "backend": {},
+                    "custom": {},
+                }
+            data.setdefault("ai_ml", {})
+            data.setdefault("backend", {})
+            data.setdefault("custom", {})
+            return data
         return {
             "version": 1,
             "ai_ml": {},
             "backend": {},
+            "custom": {},
         }
 
     def _save(self):
@@ -30,7 +41,9 @@ class EmailDatabase:
     def is_seen(self, email: str) -> bool:
         email = email.lower()
         return (
-            email in self.data["ai_ml"] or email in self.data["backend"]
+            email in self.data["ai_ml"]
+            or email in self.data["backend"]
+            or email in self.data["custom"]
         )
 
     def add_emails(self, emails_with_keyword: list, role: str):
@@ -46,8 +59,10 @@ class EmailDatabase:
             }
             if role == "ai":
                 self.data["ai_ml"][email] = entry
-            else:
+            elif role == "backend":
                 self.data["backend"][email] = entry
+            else:
+                self.data["custom"][email] = entry
             added.append((email, keyword))
         self._save()
         return added
@@ -57,17 +72,25 @@ class EmailDatabase:
             return list(self.data["ai_ml"].keys())
         if role == "backend":
             return list(self.data["backend"].keys())
+        if role == "custom":
+            return list(self.data["custom"].keys())
         all_emails = set(self.data["ai_ml"].keys())
         all_emails.update(self.data["backend"].keys())
+        all_emails.update(self.data["custom"].keys())
         return sorted(all_emails)
 
     def total_count(self):
-        return len(self.data["ai_ml"]) + len(self.data["backend"])
+        return (
+            len(self.data["ai_ml"])
+            + len(self.data["backend"])
+            + len(self.data["custom"])
+        )
 
     def breakdown(self):
         return {
             "ai": len(self.data["ai_ml"]),
             "backend": len(self.data["backend"]),
+            "custom": len(self.data["custom"]),
             "total": self.total_count(),
         }
 
@@ -82,6 +105,10 @@ class EmailDatabase:
 
             f.write("\n===== JAVA BACKEND ROLES =====\n")
             for email, info in sorted(self.data["backend"].items()):
+                f.write(f"{email}  # {info['first_seen']} — {info['keyword']}\n")
+
+            f.write("\n===== CUSTOM SEARCH =====\n")
+            for email, info in sorted(self.data["custom"].items()):
                 f.write(f"{email}  # {info['first_seen']} — {info['keyword']}\n")
 
         logger.info(f"Master DB exported to {output_path}")

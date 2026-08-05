@@ -55,6 +55,7 @@ Talk to your bot on Telegram:
 
 - `/start` — Welcome message
 - `/hunt` — Run harvest immediately
+- `/search <keywords>` — Custom keyword search (separate with `|`, optional leading number = pages)
 - `/status` — Last harvest stats
 - `/setcookies` — Update cookies without redeploying
 
